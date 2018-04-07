@@ -1,228 +1,260 @@
-// The ConversationPanel module is designed to handle
-// all display and behaviors of the conversation column of the app.
-/* eslint no-unused-vars: "off" */
-/* global Api: true, Common: true*/
+// Watson Assistant の IBM公式サンプルコードの骨子のみを、jQuery で簡略化した
 
-var ConversationPanel = (function() {
-  var settings = {
-    selectors: {
-      chatBox: '#scrollingChat',
-      fromUser: '.from-user',
-      fromWatson: '.from-watson',
-      latest: '.latest'
+
+;( function( $ ) {
+
+
+  var watsonAssistantApi = window.watsonAssistantApi = {
+
+    // Watson Assistant では、context や変数をアプリケーション側で保持しておく必要がある
+    stored :{
+      requestPayload : {},
+      responsePayload : {}
     },
-    authorTypes: {
-      user: 'user',
-      watson: 'watson'
-    }
-  };
 
-  // Publicly accessible methods defined
-  return {
-    init: init,
-    inputKeyDown: inputKeyDown
-  };
+    messageEndpoint : '/api/message',
 
-  // Initialize the module
-  function init() {
-    chatUpdateSetup();
-    Api.sendRequest( '', null );
-    setupInputBox();
-  }
-  // Set up callbacks on payload setters in Api module
-  // This causes the displayMessage function to be called when messages are sent / received
-  function chatUpdateSetup() {
-    var currentRequestPayloadSetter = Api.setRequestPayload;
-    Api.setRequestPayload = function(newPayloadStr) {
-      currentRequestPayloadSetter.call(Api, newPayloadStr);
-      displayMessage(JSON.parse(newPayloadStr), settings.authorTypes.user);
-    };
+    sendRequest : function( text, context ) {
+      // Watson にクエリを送信し、レスポンスを受け取り、別のイベントへ受け渡す
 
-    var currentResponsePayloadSetter = Api.setResponsePayload;
-    Api.setResponsePayload = function(newPayloadStr) {
-      currentResponsePayloadSetter.call(Api, newPayloadStr);
-      displayMessage(JSON.parse(newPayloadStr), settings.authorTypes.watson);
-    };
-  }
+      var _this = this;
+      var payloadToWatson = {};
+      var param, e;
 
-// Set up the input box to underline text as it is typed
-  // This is done by creating a hidden dummy version of the input box that
-  // is used to determine what the width of the input text should be.
-  // This value is then used to set the new width of the visible input box.
-  function setupInputBox() {
-    var input = document.getElementById('textInput');
-    var dummy = document.getElementById('textInputDummy');
-    var minFontSize = 14;
-    var maxFontSize = 16;
-    var minPadding = 4;
-    var maxPadding = 6;
+      if ( text ) {
+        payloadToWatson.input = {
+          text: text
+        };
+      }
+      if ( context ) {
+        payloadToWatson.context = context;
+      }
 
-    // If no dummy input box exists, create one
-    if (dummy === null) {
-      var dummyJson = {
-        'tagName': 'div',
-        'attributes': [{
-          'name': 'id',
-          'value': 'textInputDummy'
-        }]
-      };
+      param = JSON.stringify( payloadToWatson );
 
-      dummy = Common.buildDomElement(dummyJson);
-      document.body.appendChild(dummy);
-    }
+      // ユーザーの入力を保存する
+      _this.setRequestPayload( param );
 
-    function adjustInput() {
-      if (input.value === '') {
-        // If the input box is empty, remove the underline
-        input.classList.remove('underline');
-        input.setAttribute('style', 'width:' + '100%');
-        input.style.width = '100%';
+      // 送信時のカスタムイベントを発火する
+      e = $.Event( 'watsonAssistant.request', {
+        typeValue : 'user',
+        payload: _this.getRequestPayload()
+      } );
+      $( window ).trigger( e );
+
+      // Watson に Ajax でクエリを送信する
+      $.ajax( {
+
+        type : 'POST',
+        contentType : 'application/json',
+        url : _this.messageEndpoint,
+        data : param
+
+      } )
+
+      .then( function( data ) {
+        // Ajax が成功したら
+
+        // Watson の応答を保存する
+        _this.setResponsePayload( data );
+
+        // 受信時のカスタムイベントを発火する
+        e = $.Event( 'watsonAssistant.response', {
+          typeValue : 'watson',
+          payload: _this.getResponsePayload()
+        } );
+        $( window ).trigger( e );
+
+      } )
+
+      .catch( function( jqXHR, textStatus, errorThrown ) {
+        // エラーが発生したら
+
+        console.log( errorThrown );
+
+      } );
+
+    },
+
+    getRequestPayload : function() {
+      // ユーザーからの前回の入力を返す
+
+      var _this = this;
+      return _this.stored.requestPayload;
+
+    },
+
+    setRequestPayload : function( newPayloadStr ) {
+      // ユーザーからの入力を保存する
+
+      var _this = this;
+
+      if ( $.type( newPayloadStr ) === 'string' ) { // JSONオブジェクトじゃなかったら
+        newPayloadStr = JSON.parse( newPayloadStr );
+      }
+
+      _this.stored.requestPayload = newPayloadStr;
+
+    },
+
+    getResponsePayload : function() {
+      // Watson からの前回の応答を返す
+
+      var _this = this;
+      return _this.stored.responsePayload;
+
+    },
+
+    setResponsePayload : function( newPayloadStr ) {
+      // Watson からの応答を保存する
+
+      var _this = this;
+
+      if ( $.type( newPayloadStr ) === 'string' ) { // JSONオブジェクトじゃなかったら
+        newPayloadStr = JSON.parse( newPayloadStr );
+      }
+
+      _this.stored.responsePayload = newPayloadStr;
+
+    },
+
+    displayMessage : function( newPayload, typeValue ) {
+      // 送信したユーザーの入力 または 受信した Watson のメッセージを表示する
+
+      var _this = this;
+
+      var isUser = ( typeValue === 'user' ) ? true : false;
+      var chatBox = $( '#scrollingChat' );
+      var template = $( $( 'script[type*=templateChat]' ).eq( 0 ).html() ); // HTML中に script要素を利用して、テンプレートを書き込んでおく
+      var text, message;
+
+      if ( isUser ) {
+        text = ( newPayload.input && newPayload.input.text );
       } else {
-        // otherwise, adjust the dummy text to match, and then set the width of
-        // the visible input box to match it (thus extending the underline)
-        input.classList.add('underline');
-        var txtNode = document.createTextNode(input.value);
-        ['font-size', 'font-style', 'font-weight', 'font-family', 'line-height',
-          'text-transform', 'letter-spacing'].forEach(function(index) {
-            dummy.style[index] = window.getComputedStyle(input, null).getPropertyValue(index);
-          });
-        dummy.textContent = txtNode.textContent;
+        text = ( newPayload.output && newPayload.output.text );
+      }
 
-        var padding = 0;
-        var htmlElem = document.getElementsByTagName('html')[0];
-        var currentFontSize = parseInt(window.getComputedStyle(htmlElem, null).getPropertyValue('font-size'), 10);
-        if (currentFontSize) {
-          padding = Math.floor((currentFontSize - minFontSize) / (maxFontSize - minFontSize)
-            * (maxPadding - minPadding) + minPadding);
+      if ( text ) {
+
+        // メッセージのDOM要素を作成する
+        if( isUser ){
+          template.find( '.message-outer' ).addClass( 'from-user' );
+          $( '.from-user.latest' ).removeClass( 'latest' ); // 古いセレクタを削除
         } else {
-          padding = maxPadding;
+          template.find( '.message-outer' ).addClass( 'from-watson' );
+          $( '.from-watson.latest' ).removeClass( 'latest' ); // 古いセレクタを削除
+        }
+        template.find( '.message-text' ).html( text );
+        message = template;
+
+        // メッセージのDOM要素を追加する
+        chatBox.append( message );
+
+        // 追加されたメッセージにスクロールする
+        _this.scrollToChatBottom();
+      }
+
+    },
+
+    scrollToChatBottom : function() {
+      // 最新のメッセージまでスクロールする
+
+      var scrollEl = $( '#scrollingChat' ).find( '.from-user.latest' );
+      if ( scrollEl ) {
+        $( 'body, html' ).animate( { scrollTop : scrollEl.offset().top }, 500 );
+      }
+
+    },
+
+    init : function() {
+      // 初期化
+
+      var _this = this;
+
+      // チャット入力欄でエンターキーを押下
+      $( '#js-chat-input-text' ).keydown( function( event ) {
+
+        var inputBox = $( '#js-chat-input-text' );
+
+        // エンターキーが押されて、かつ、チャット入力欄が空でない
+        if ( event.keyCode === 13 && inputBox.val() ) {
+
+          // 送信ボタンをクリック
+          $( '#js-chat-input-submit' ).trigger( 'click' );
+
         }
 
-        var widthValue = ( dummy.offsetWidth + padding) + 'px';
-        input.setAttribute('style', 'width:' + widthValue);
-        input.style.width = widthValue;
-      }
+      } );
+
+
+      // 送信ボタンを押下
+      $( '#js-chat-input-submit' ).click( function( event ) {
+
+        var inputBox = $( '#js-chat-input-text' );
+
+        // チャット入力欄が空でない
+        if ( inputBox.val() ) {
+
+          // サーバーサイドから前回のレスポンスにある、context の値を継承する。
+          // context には、conversation_id が含まれていて、Dialog のステート（状態）を示している。
+          var context;
+          var latestResponse = _this.getResponsePayload();
+
+          if ( latestResponse ) {
+            context = latestResponse.context;
+          }
+
+          // メッセージを送信する
+          _this.sendRequest( inputBox.val(), context );
+
+          // 次回の入力にそなえてチャット入力欄を空にする
+          inputBox.val( '' );
+
+        }
+
+      } );
+
+
+      // ユーザーがリクエストを送信したとき
+      $( window ).on( 'watsonAssistant.request', function( event ) {
+
+        // eventオブジェクトの内容
+        // event.payload : ユーザーの入力値と context を含めたオブジェクト
+        // event.typeValue : 'user'という文字列
+
+        // このイベントにバインドして送信時の処理や分岐を書く。
+        // 例えば、質問ログをアクセス解析ツールへ渡す、など。
+
+        _this.displayMessage( event.payload, event.typeValue );
+
+      } );
+
+
+      // Watson からレスポンスを受信したとき
+      $( window ).on( 'watsonAssistant.response', function( event ) {
+
+        // eventオブジェクトの内容
+        // event.payload : Watson が応答したオブジェクト
+        // event.typeValue : 'watson'という文字列
+
+        // このイベントにバインドして受信時の処理や分岐を書く。
+        // 例えば、Assistant の output オブジェクトに "action" : "NLC" という値を含めておき、
+        // Natural Language Classifier へ問い合わせして、その結果を displayMessage() に渡す、など。
+        // Assistant は、処理を Assistant 内だけで完結させず、ほかのAPIと組み合わせると、柔軟性が広がる。
+        // また、応答ログをアクセス解析ツールへ渡すなども、ここで行う。
+
+        _this.displayMessage( event.payload, event.typeValue );
+
+      } );
+
+
     }
 
-    // Any time the input changes, or the window resizes, adjust the size of the input box
-    input.addEventListener('input', adjustInput);
-    window.addEventListener('resize', adjustInput);
+  };
 
-    // Trigger the input event once to set up the input box and dummy element
-    Common.fireEvent(input, 'input');
-  }
 
-  // Display a user or Watson message that has just been sent/received
-  function displayMessage(newPayload, typeValue) {
-    var isUser = isUserMessage(typeValue);
-    var textExists = (newPayload.input && newPayload.input.text)
-      || (newPayload.output && newPayload.output.text);
-    if (isUser !== null && textExists) {
-      // Create new message DOM element
-      var messageDivs = buildMessageDomElements(newPayload, isUser);
-      var chatBoxElement = document.querySelector(settings.selectors.chatBox);
-      var previousLatest = chatBoxElement.querySelectorAll((isUser
-              ? settings.selectors.fromUser : settings.selectors.fromWatson)
-              + settings.selectors.latest);
-      // Previous "latest" message is no longer the most recent
-      if (previousLatest) {
-        Common.listForEach(previousLatest, function(element) {
-          element.classList.remove('latest');
-        });
-      }
+  // 初期化
+  watsonAssistantApi.init();
 
-      messageDivs.forEach(function(currentDiv) {
-        chatBoxElement.appendChild(currentDiv);
-        // Class to start fade in animation
-        currentDiv.classList.add('load');
-      });
-      // Move chat to the most recent messages when new messages are added
-      scrollToChatBottom();
-    }
-  }
 
-  // Checks if the given typeValue matches with the user "name", the Watson "name", or neither
-  // Returns true if user, false if Watson, and null if neither
-  // Used to keep track of whether a message was from the user or Watson
-  function isUserMessage(typeValue) {
-    if (typeValue === settings.authorTypes.user) {
-      return true;
-    } else if (typeValue === settings.authorTypes.watson) {
-      return false;
-    }
-    return null;
-  }
-
-  // Constructs new DOM element from a message payload
-  function buildMessageDomElements(newPayload, isUser) {
-    var textArray = isUser ? newPayload.input.text : newPayload.output.text;
-    if (Object.prototype.toString.call( textArray ) !== '[object Array]') {
-      textArray = [textArray];
-    }
-    var messageArray = [];
-
-    textArray.forEach(function(currentText) {
-      if (currentText) {
-        var messageJson = {
-          // <div class='segments'>
-          'tagName': 'div',
-          'classNames': ['segments'],
-          'children': [{
-            // <div class='from-user/from-watson latest'>
-            'tagName': 'div',
-            'classNames': [(isUser ? 'from-user' : 'from-watson'), 'latest', ((messageArray.length === 0) ? 'top' : 'sub')],
-            'children': [{
-              // <div class='message-inner'>
-              'tagName': 'div',
-              'classNames': ['message-inner'],
-              'children': [{
-                // <p>{messageText}</p>
-                'tagName': 'p',
-                'text': currentText
-              }]
-            }]
-          }]
-        };
-        messageArray.push(Common.buildDomElement(messageJson));
-      }
-    });
-
-    return messageArray;
-  }
-
-  // Scroll to the bottom of the chat window (to the most recent messages)
-  // Note: this method will bring the most recent user message into view,
-  //   even if the most recent message is from Watson.
-  //   This is done so that the "context" of the conversation is maintained in the view,
-  //   even if the Watson message is long.
-  function scrollToChatBottom() {
-    var scrollingChat = document.querySelector('#scrollingChat');
-
-    // Scroll to the latest message sent by the user
-    var scrollEl = scrollingChat.querySelector(settings.selectors.fromUser
-            + settings.selectors.latest);
-    if (scrollEl) {
-      scrollingChat.scrollTop = scrollEl.offsetTop;
-    }
-  }
-
-  // Handles the submission of input
-  function inputKeyDown(event, inputBox) {
-    // Submit on enter key, dis-allowing blank messages
-    if (event.keyCode === 13 && inputBox.value) {
-      // Retrieve the context from the previous server response
-      var context;
-      var latestResponse = Api.getResponsePayload();
-      if (latestResponse) {
-        context = latestResponse.context;
-      }
-
-      // Send the user message
-      Api.sendRequest(inputBox.value, context);
-
-      // Clear input box for further messages
-      inputBox.value = '';
-      Common.fireEvent(inputBox, 'input');
-    }
-  }
-}());
+} )( jQuery );
