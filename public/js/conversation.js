@@ -256,5 +256,10 @@
   // 初期化
   watsonAssistantApi.init();
 
+  // 最初のリクエストを送る。
+  // Assistant では、最初の語りかけはアプリケーションの側から行う必要がある。
+  // すると Assistant の Dialog ツリーの、welcome ノードまたは conversation_start ノードが返る。
+  watsonAssistantApi.sendRequest( '', '' );
+
 
 } )( jQuery );
